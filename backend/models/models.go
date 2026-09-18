@@ -143,6 +143,12 @@ type Payment struct {
 	Type          string    `json:"type" gorm:"size:20;default:tuition"`
 	Status        string    `json:"status" gorm:"size:20;default:paid"`
 	ReceiptNo     string    `json:"receipt_no" gorm:"size:50;uniqueIndex"`
+	// RefundedAmount 已批准退费的合计，由退费流程在事务内维护
+	RefundedAmount      float64  `json:"refunded_amount" gorm:"type:decimal(10,2);default:0"`
+	// 以下为查询时计算的派生字段，不落库
+	PendingRefundAmount float64  `json:"pending_refund_amount" gorm:"-"`
+	RefundableAmount    float64  `json:"refundable_amount" gorm:"-"`
+	NetIncome           float64  `json:"net_income" gorm:"-"`
 	Remarks       string    `json:"remarks" gorm:"type:text"`
 	Student       *Student  `json:"student,omitempty" gorm:"foreignKey:StudentID"`
 	Course        *Course   `json:"course,omitempty" gorm:"foreignKey:CourseID"`
@@ -157,6 +163,7 @@ type Refund struct {
 	Status      string    `json:"status" gorm:"size:20;default:pending"`
 	RefundDate  *string   `json:"refund_date" gorm:"size:10"`
 	ProcessedBy *uint     `json:"processed_by" gorm:"index"`
+	Payment     *Payment  `json:"payment,omitempty" gorm:"foreignKey:PaymentID"`
 }
 
 type Performance struct {
