@@ -43,8 +43,16 @@ func Init(cfg *config.DBConfig) error {
 
 	log.Println("Database connected successfully")
 
+	needBackfill := paymentNetIncomeColumnMissing()
+
 	if err := migrate(); err != nil {
 		return err
+	}
+
+	if needBackfill {
+		if err := backfillRefundCounters(); err != nil {
+			return err
+		}
 	}
 
 	if err := seed(); err != nil {
@@ -52,6 +60,34 @@ func Init(cfg *config.DBConfig) error {
 	}
 
 	return nil
+}
+
+// paymentNetIncomeColumnMissing 判断 net_income 列是否尚未建立，
+// 仅在本次 AutoMigrate 新增列前返回 true，用于历史数据一次性回填。
+func paymentNetIncomeColumnMissing() bool {
+	var count int64
+	DB.Raw(`SELECT COUNT(*) FROM information_schema.columns
+		WHERE table_schema = DATABASE() AND table_name = 'payments'
+		AND column_name = 'net_income'`).Scan(&count)
+	return count == 0
+}
+
+// backfillRefundCounters 依据已存在的退费单回填缴费单的
+// 已退金额、待审金额与财务净收入，保证升级后数据一致。
+func backfillRefundCounters() error {
+	return DB.Exec(`
+		UPDATE payments p
+		LEFT JOIN (
+			SELECT payment_id,
+				SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END) AS refunded,
+				SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) AS pending
+			FROM refunds
+			GROUP BY payment_id
+		) r ON r.payment_id = p.id
+		SET p.refunded_amount = COALESCE(r.refunded, 0),
+		    p.pending_refund_amount = COALESCE(r.pending, 0),
+		    p.net_income = p.amount - COALESCE(r.refunded, 0)
+	`).Error
 }
 
 func migrate() error {

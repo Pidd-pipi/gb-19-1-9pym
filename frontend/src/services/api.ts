@@ -162,6 +162,24 @@ export interface Payment {
   status?: string
   receipt_no?: string
   remarks?: string
+  refunded_amount?: number
+  pending_refund_amount?: number
+  net_income?: number
+  available_refund_amount?: number
+}
+
+export interface Refund {
+  id?: number
+  student_id: number
+  payment_id: number
+  amount: number
+  reason?: string
+  status?: 'pending' | 'approved' | 'rejected'
+  refund_date?: string
+  processed_by?: number
+  reject_reason?: string
+  payment?: Payment
+  student?: Student
 }
 
 export const paymentApi = {
@@ -174,10 +192,13 @@ export const paymentApi = {
 }
 
 export const refundApi = {
-  list: () => get('/refunds'),
-  create: (data: any) => post('/refunds', data),
-  process: (id: number, data: { status: string }) =>
-    post(`/refunds/${id}/process`, data),
+  list: (params?: any) => get('/refunds', params),
+  create: (data: Pick<Refund, 'payment_id' | 'student_id' | 'amount' | 'reason'>) =>
+    post('/refunds', data),
+  process: (
+    id: number,
+    data: { status: 'approved' | 'rejected'; reject_reason?: string },
+  ) => post(`/refunds/${id}/process`, data),
 }
 
 export const dashboardApi = {

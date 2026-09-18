@@ -135,28 +135,41 @@ type Attendance struct {
 
 type Payment struct {
 	BaseModel
-	StudentID     uint      `json:"student_id" gorm:"index;not null"`
-	CourseID      *uint     `json:"course_id" gorm:"index"`
-	Amount        float64   `json:"amount" gorm:"type:decimal(10,2);not null"`
-	PaymentMethod string    `json:"payment_method" gorm:"size:20;not null"`
-	PaymentDate   string    `json:"payment_date" gorm:"size:10;not null"`
-	Type          string    `json:"type" gorm:"size:20;default:tuition"`
-	Status        string    `json:"status" gorm:"size:20;default:paid"`
-	ReceiptNo     string    `json:"receipt_no" gorm:"size:50;uniqueIndex"`
-	Remarks       string    `json:"remarks" gorm:"type:text"`
-	Student       *Student  `json:"student,omitempty" gorm:"foreignKey:StudentID"`
-	Course        *Course   `json:"course,omitempty" gorm:"foreignKey:CourseID"`
+	StudentID           uint     `json:"student_id" gorm:"index;not null"`
+	CourseID            *uint    `json:"course_id" gorm:"index"`
+	Amount              float64  `json:"amount" gorm:"type:decimal(10,2);not null"`
+	PaymentMethod       string   `json:"payment_method" gorm:"size:20;not null"`
+	PaymentDate         string   `json:"payment_date" gorm:"size:10;not null"`
+	Type                string   `json:"type" gorm:"size:20;default:tuition"`
+	Status              string   `json:"status" gorm:"size:20;default:paid"`
+	ReceiptNo           string   `json:"receipt_no" gorm:"size:50;uniqueIndex"`
+	Remarks             string   `json:"remarks" gorm:"type:text"`
+	RefundedAmount      float64  `json:"refunded_amount" gorm:"type:decimal(12,2);not null;default:0"`
+	PendingRefundAmount float64  `json:"pending_refund_amount" gorm:"type:decimal(12,2);not null;default:0"`
+	NetIncome           float64  `json:"net_income" gorm:"type:decimal(12,2);not null;default:0"`
+	AvailableRefundAmount float64 `json:"available_refund_amount" gorm:"-"`
+	Student             *Student `json:"student,omitempty" gorm:"foreignKey:StudentID"`
+	Course              *Course  `json:"course,omitempty" gorm:"foreignKey:CourseID"`
+}
+
+// AfterFind 计算当前可退金额：实收 - 已退 - 待审
+func (p *Payment) AfterFind(tx *gorm.DB) error {
+	p.AvailableRefundAmount = p.Amount - p.RefundedAmount - p.PendingRefundAmount
+	return nil
 }
 
 type Refund struct {
 	BaseModel
-	StudentID   uint      `json:"student_id" gorm:"index;not null"`
-	PaymentID   uint      `json:"payment_id" gorm:"index;not null"`
-	Amount      float64   `json:"amount" gorm:"type:decimal(10,2);not null"`
-	Reason      string    `json:"reason" gorm:"type:text"`
-	Status      string    `json:"status" gorm:"size:20;default:pending"`
-	RefundDate  *string   `json:"refund_date" gorm:"size:10"`
-	ProcessedBy *uint     `json:"processed_by" gorm:"index"`
+	StudentID    uint     `json:"student_id" gorm:"index;not null"`
+	PaymentID    uint     `json:"payment_id" gorm:"index;not null"`
+	Amount       float64  `json:"amount" gorm:"type:decimal(10,2);not null"`
+	Reason       string   `json:"reason" gorm:"type:text"`
+	Status       string   `json:"status" gorm:"size:20;default:pending"`
+	RefundDate   *string  `json:"refund_date" gorm:"size:10"`
+	ProcessedBy  *uint    `json:"processed_by" gorm:"index"`
+	RejectReason string   `json:"reject_reason" gorm:"type:text"`
+	Payment      *Payment `json:"payment,omitempty" gorm:"foreignKey:PaymentID"`
+	Student      *Student `json:"student,omitempty" gorm:"foreignKey:StudentID"`
 }
 
 type Performance struct {

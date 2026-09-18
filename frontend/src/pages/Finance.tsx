@@ -3,7 +3,6 @@ import {
   Table,
   Card,
   Button,
-  Input,
   Modal,
   Form,
   Space,
@@ -15,12 +14,17 @@ import {
   InputNumber,
   Tabs,
   Radio,
+  Tag,
+  Statistic,
+  Row,
+  Col,
+  Input,
 } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, TransactionOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { paymentApi, studentApi, courseApi } from '@/services/api'
+import { paymentApi, refundApi, studentApi, courseApi } from '@/services/api'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 const { Option } = Select
 const { TextArea } = Input
 
@@ -37,25 +41,71 @@ const paymentTypes = [
   { value: 'other', label: '其他' },
 ]
 
+const refundStatusMap: Record<string, { label: string; color: string }> = {
+  pending: { label: '待审核', color: 'gold' },
+  approved: { label: '已退费', color: 'green' },
+  rejected: { label: '已驳回', color: 'red' },
+}
+
+const money = (v?: number | string) => {
+  const n = Number(v ?? 0)
+  return Number.isFinite(n) ? n.toFixed(2) : '0.00'
+}
+
 function Finance() {
-  const [loading, setLoading] = useState(false)
+  const [paymentLoading, setPaymentLoading] = useState(false)
+  const [refundLoading, setRefundLoading] = useState(false)
   const [payments, setPayments] = useState<any[]>([])
+  const [refunds, setRefunds] = useState<any[]>([])
+  const [reports, setReports] = useState<any[]>([])
+  const [reportType, setReportType] = useState('monthly')
   const [students, setStudents] = useState<any[]>([])
   const [courses, setCourses] = useState<any[]>([])
-  const [modalVisible, setModalVisible] = useState(false)
-  const [modalType, setModalType] = useState<'create' | 'edit'>('create')
+
+  const [paymentModalVisible, setPaymentModalVisible] = useState(false)
+  const [paymentModalType, setPaymentModalType] = useState<'create' | 'edit'>('create')
   const [selectedPayment, setSelectedPayment] = useState<any>(null)
-  const [form] = Form.useForm()
+  const [paymentForm] = Form.useForm()
+
+  const [refundModalVisible, setRefundModalVisible] = useState(false)
+  const [refundTarget, setRefundTarget] = useState<any>(null)
+  const [refundSubmitting, setRefundSubmitting] = useState(false)
+  const [refundForm] = Form.useForm()
+
+  const [rejectModalVisible, setRejectModalVisible] = useState(false)
+  const [rejectTarget, setRejectTarget] = useState<any>(null)
+  const [rejectReason, setRejectReason] = useState('')
 
   const fetchPayments = async () => {
     try {
-      setLoading(true)
-      const res: any = await paymentApi.list()
+      setPaymentLoading(true)
+      const res: any = await paymentApi.list({ page: 1, page_size: 1000 })
       setPayments(res.list || [])
     } catch (error) {
       console.error('Fetch payments error:', error)
     } finally {
-      setLoading(false)
+      setPaymentLoading(false)
+    }
+  }
+
+  const fetchRefunds = async () => {
+    try {
+      setRefundLoading(true)
+      const res: any = await refundApi.list()
+      setRefunds(res || [])
+    } catch (error) {
+      console.error('Fetch refunds error:', error)
+    } finally {
+      setRefundLoading(false)
+    }
+  }
+
+  const fetchReports = async (type = reportType) => {
+    try {
+      const res: any = await paymentApi.reports({ type })
+      setReports(res || [])
+    } catch (error) {
+      console.error('Fetch reports error:', error)
     }
   }
 
@@ -74,64 +124,136 @@ function Finance() {
 
   useEffect(() => {
     fetchPayments()
+    fetchRefunds()
+    fetchReports('monthly')
     fetchOptions()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const handleCreate = () => {
-    setModalType('create')
+  const refreshAll = () => {
+    fetchPayments()
+    fetchRefunds()
+    fetchReports()
+  }
+
+  // ---------- 缴费 ----------
+
+  const handleCreatePayment = () => {
+    setPaymentModalType('create')
     setSelectedPayment(null)
-    form.resetFields()
-    form.setFieldsValue({
+    paymentForm.resetFields()
+    paymentForm.setFieldsValue({
       payment_date: dayjs(),
       payment_method: 'wechat',
       type: 'tuition',
     })
-    setModalVisible(true)
+    setPaymentModalVisible(true)
   }
 
-  const handleEdit = (payment: any) => {
-    setModalType('edit')
+  const handleEditPayment = (payment: any) => {
+    setPaymentModalType('edit')
     setSelectedPayment(payment)
-    form.setFieldsValue({
+    paymentForm.setFieldsValue({
       ...payment,
       payment_date: payment.payment_date ? dayjs(payment.payment_date) : undefined,
     })
-    setModalVisible(true)
+    setPaymentModalVisible(true)
   }
 
-  const handleDelete = async (id: number) => {
+  const handleDeletePayment = async (id: number) => {
     try {
       await paymentApi.delete(id)
       message.success('删除成功')
-      fetchPayments()
+      refreshAll()
     } catch (error) {
       console.error('Delete payment error:', error)
     }
   }
 
-  const handleModalSubmit = async () => {
+  const handlePaymentSubmit = async () => {
     try {
-      const values = await form.validateFields()
+      const values = await paymentForm.validateFields()
       const data = {
         ...values,
         payment_date: values.payment_date.format('YYYY-MM-DD'),
       }
 
-      if (modalType === 'create') {
+      if (paymentModalType === 'create') {
         await paymentApi.create(data)
         message.success('创建成功')
       } else if (selectedPayment?.id) {
         await paymentApi.update(selectedPayment.id, data)
         message.success('更新成功')
       }
-      setModalVisible(false)
-      fetchPayments()
+      setPaymentModalVisible(false)
+      refreshAll()
     } catch (error) {
-      console.error('Modal submit error:', error)
+      console.error('Payment submit error:', error)
     }
   }
 
-  const columns = [
+  // ---------- 退费 ----------
+
+  const handleOpenRefund = (payment: any) => {
+    setRefundTarget(payment)
+    refundForm.resetFields()
+    refundForm.setFieldsValue({ amount: payment.available_refund_amount })
+    setRefundModalVisible(true)
+  }
+
+  const handleRefundSubmit = async () => {
+    try {
+      const values = await refundForm.validateFields()
+      setRefundSubmitting(true)
+      await refundApi.create({
+        payment_id: refundTarget.id,
+        student_id: refundTarget.student_id,
+        amount: values.amount,
+        reason: values.reason,
+      })
+      message.success('退费申请已提交，等待审核')
+      setRefundModalVisible(false)
+      refreshAll()
+    } catch (error) {
+      console.error('Create refund error:', error)
+    } finally {
+      setRefundSubmitting(false)
+    }
+  }
+
+  const handleApprove = async (refund: any) => {
+    try {
+      await refundApi.process(refund.id, { status: 'approved' })
+      message.success('已批准退费')
+      refreshAll()
+    } catch (error) {
+      console.error('Approve refund error:', error)
+    }
+  }
+
+  const handleOpenReject = (refund: any) => {
+    setRejectTarget(refund)
+    setRejectReason('')
+    setRejectModalVisible(true)
+  }
+
+  const handleRejectSubmit = async () => {
+    try {
+      await refundApi.process(rejectTarget.id, {
+        status: 'rejected',
+        reject_reason: rejectReason,
+      })
+      message.success('已驳回申请')
+      setRejectModalVisible(false)
+      refreshAll()
+    } catch (error) {
+      console.error('Reject refund error:', error)
+    }
+  }
+
+  // ---------- 表格列 ----------
+
+  const paymentColumns = [
     {
       title: '学员',
       dataIndex: ['student', 'name'],
@@ -145,27 +267,48 @@ function Finance() {
       render: (name: string) => name || '-',
     },
     {
-      title: '金额(元)',
+      title: '实收金额(元)',
       dataIndex: 'amount',
       key: 'amount',
+      render: (v: number) => <Text strong>{money(v)}</Text>,
+    },
+    {
+      title: '已退(元)',
+      dataIndex: 'refunded_amount',
+      key: 'refunded_amount',
+      render: (v: number) => money(v),
+    },
+    {
+      title: '待审(元)',
+      dataIndex: 'pending_refund_amount',
+      key: 'pending_refund_amount',
+      render: (v: number) => (v > 0 ? <Text type="warning">{money(v)}</Text> : money(v)),
+    },
+    {
+      title: '可退金额(元)',
+      dataIndex: 'available_refund_amount',
+      key: 'available_refund_amount',
+      render: (v: number) => (
+        <Text type={v > 0.005 ? 'success' : 'secondary'}>{money(v)}</Text>
+      ),
+    },
+    {
+      title: '净收入(元)',
+      dataIndex: 'net_income',
+      key: 'net_income',
+      render: (v: number) => <Text strong>{money(v)}</Text>,
     },
     {
       title: '支付方式',
       dataIndex: 'payment_method',
       key: 'payment_method',
-      render: (method: string) => {
-        const opt = paymentMethods.find((o) => o.value === method)
-        return opt?.label || method
-      },
+      render: (method: string) => paymentMethods.find((o) => o.value === method)?.label || method,
     },
     {
       title: '类型',
       dataIndex: 'type',
       key: 'type',
-      render: (type: string) => {
-        const opt = paymentTypes.find((o) => o.value === type)
-        return opt?.label || type
-      },
+      render: (type: string) => paymentTypes.find((o) => o.value === type)?.label || type,
     },
     {
       title: '日期',
@@ -181,13 +324,21 @@ function Finance() {
       title: '操作',
       key: 'action',
       render: (_: any, record: any) => (
-        <Space size="small">
-          <Button type="link" size="small" onClick={() => handleEdit(record)}>
+        <Space size="small" wrap>
+          <Button type="link" size="small" onClick={() => handleEditPayment(record)}>
             <EditOutlined /> 编辑
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            disabled={Number(record.available_refund_amount ?? 0) <= 0.005}
+            onClick={() => handleOpenRefund(record)}
+          >
+            <TransactionOutlined /> 申请退费
           </Button>
           <Popconfirm
             title="确定删除?"
-            onConfirm={() => handleDelete(record.id!)}
+            onConfirm={() => handleDeletePayment(record.id!)}
             okText="确定"
             cancelText="取消"
           >
@@ -199,6 +350,122 @@ function Finance() {
       ),
     },
   ]
+
+  const refundColumns = [
+    {
+      title: '申请时间',
+      dataIndex: 'created_at',
+      key: 'created_at',
+      render: (v: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-'),
+    },
+    {
+      title: '学员',
+      key: 'student',
+      render: (_: any, record: any) => record.student?.name || record.payment?.student?.name || '-',
+    },
+    {
+      title: '关联收据',
+      key: 'receipt',
+      render: (_: any, record: any) => record.payment?.receipt_no || `#${record.payment_id}`,
+    },
+    {
+      title: '课程',
+      key: 'course',
+      render: (_: any, record: any) => record.payment?.course?.name || '-',
+    },
+    {
+      title: '申请金额(元)',
+      dataIndex: 'amount',
+      key: 'amount',
+      render: (v: number) => money(v),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status: string) => {
+        const s = refundStatusMap[status] || { label: status, color: 'default' }
+        return <Tag color={s.color}>{s.label}</Tag>
+      },
+    },
+    {
+      title: '申请原因',
+      dataIndex: 'reason',
+      key: 'reason',
+      render: (v: string) => v || '-',
+    },
+    {
+      title: '驳回原因',
+      dataIndex: 'reject_reason',
+      key: 'reject_reason',
+      render: (v: string) => v || '-',
+    },
+    {
+      title: '退费日期',
+      dataIndex: 'refund_date',
+      key: 'refund_date',
+      render: (v: string) => v || '-',
+    },
+    {
+      title: '操作',
+      key: 'action',
+      render: (_: any, record: any) =>
+        record.status === 'pending' ? (
+          <Space size="small">
+            <Popconfirm
+              title="确认批准该退费？"
+              description={`将退回 ${money(record.amount)} 元，并扣减可退金额与净收入`}
+              onConfirm={() => handleApprove(record)}
+              okText="确认批准"
+              cancelText="取消"
+            >
+              <Button type="link" size="small">
+                批准
+              </Button>
+            </Popconfirm>
+            <Button type="link" size="small" danger onClick={() => handleOpenReject(record)}>
+              驳回
+            </Button>
+          </Space>
+        ) : (
+          <Text type="secondary">已处理</Text>
+        ),
+    },
+  ]
+
+  const reportColumns = [
+    { title: '期间', dataIndex: 'period', key: 'period' },
+    {
+      title: '收款方式',
+      dataIndex: 'payment_method',
+      key: 'payment_method',
+      render: (method: string) => paymentMethods.find((o) => o.value === method)?.label || method,
+    },
+    { title: '缴费笔数', dataIndex: 'payment_count', key: 'payment_count' },
+    {
+      title: '实收合计(元)',
+      dataIndex: 'total_income',
+      key: 'total_income',
+      render: (v: any) => money(v),
+    },
+    {
+      title: '退费金额(元)',
+      dataIndex: 'refund_amount',
+      key: 'refund_amount',
+      render: (v: any) => money(v),
+    },
+    {
+      title: '净收入(元)',
+      dataIndex: 'net_income',
+      key: 'net_income',
+      render: (v: any) => <Text strong>{money(v)}</Text>,
+    },
+  ]
+
+  const sumField = (list: any[], field: string) =>
+    list.reduce((acc, item) => acc + Number(item[field] ?? 0), 0)
+
+  // ---------- 渲染 ----------
 
   return (
     <div>
@@ -213,38 +480,117 @@ function Finance() {
             label: '缴费记录',
             children: (
               <Card>
-                <div
-                  style={{
-                    marginBottom: 16,
-                    display: 'flex',
-                    justifyContent: 'flex-end',
-                  }}
-                >
-                  <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+                <Row gutter={24} style={{ marginBottom: 16 }}>
+                  <Col span={6}>
+                    <Statistic title="实收合计(元)" value={money(sumField(payments, 'amount'))} />
+                  </Col>
+                  <Col span={6}>
+                    <Statistic
+                      title="已退合计(元)"
+                      valueStyle={{ color: '#cf1322' }}
+                      value={money(sumField(payments, 'refunded_amount'))}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Statistic
+                      title="待审退费(元)"
+                      valueStyle={{ color: '#d48806' }}
+                      value={money(sumField(payments, 'pending_refund_amount'))}
+                    />
+                  </Col>
+                  <Col span={6}>
+                    <Statistic title="财务净收入(元)" value={money(sumField(payments, 'net_income'))} />
+                  </Col>
+                </Row>
+
+                <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button type="primary" icon={<PlusOutlined />} onClick={handleCreatePayment}>
                     新增缴费
                   </Button>
                 </div>
 
                 <Table
-                  columns={columns}
+                  columns={paymentColumns}
                   dataSource={payments}
                   rowKey="id"
-                  loading={loading}
+                  loading={paymentLoading}
+                  scroll={{ x: 1400 }}
                 />
+              </Card>
+            ),
+          },
+          {
+            key: 'refunds',
+            label: '退费申请',
+            children: (
+              <Card>
+                <Table
+                  columns={refundColumns}
+                  dataSource={refunds}
+                  rowKey="id"
+                  loading={refundLoading}
+                  scroll={{ x: 1200 }}
+                />
+              </Card>
+            ),
+          },
+          {
+            key: 'reports',
+            label: '收款统计',
+            children: (
+              <Card>
+                <Row gutter={24} style={{ marginBottom: 16 }} align="middle">
+                  <Col>
+                    <Radio.Group
+                      value={reportType}
+                      onChange={(e) => {
+                        setReportType(e.target.value)
+                        fetchReports(e.target.value)
+                      }}
+                      optionType="button"
+                      buttonStyle="solid"
+                      options={[
+                        { value: 'daily', label: '按日' },
+                        { value: 'monthly', label: '按月' },
+                        { value: 'yearly', label: '按年' }
+                      ]}
+                    />
+                  </Col>
+                  <Col>
+                    <Button onClick={() => fetchReports()}>刷新</Button>
+                  </Col>
+                </Row>
+                <Row gutter={24} style={{ marginBottom: 16 }}>
+                  <Col span={8}>
+                    <Statistic title="实收合计(元)" value={money(sumField(reports, 'total_income'))} />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic
+                      title="退费金额(元)"
+                      valueStyle={{ color: '#cf1322' }}
+                      value={money(sumField(reports, 'refund_amount'))}
+                    />
+                  </Col>
+                  <Col span={8}>
+                    <Statistic title="净收入(元)" value={money(sumField(reports, 'net_income'))} />
+                  </Col>
+                </Row>
+                <Table columns={reportColumns} dataSource={reports} rowKey={(r) => `${r.period}-${r.payment_method}`} />
               </Card>
             ),
           },
         ]}
       />
 
+      {/* 新增/编辑缴费 */}
       <Modal
-        title={modalType === 'create' ? '新增缴费' : '编辑缴费'}
-        open={modalVisible}
-        onOk={handleModalSubmit}
-        onCancel={() => setModalVisible(false)}
+        title={paymentModalType === 'create' ? '新增缴费' : '编辑缴费'}
+        open={paymentModalVisible}
+        onOk={handlePaymentSubmit}
+        onCancel={() => setPaymentModalVisible(false)}
         destroyOnClose
       >
-        <Form form={form} layout="vertical">
+        <Form form={paymentForm} layout="vertical">
           <Form.Item
             name="student_id"
             label="学员"
@@ -259,7 +605,7 @@ function Finance() {
             </Select>
           </Form.Item>
           <Form.Item name="course_id" label="课程">
-            <Select placeholder="请选择课程">
+            <Select placeholder="请选择课程" allowClear>
               {courses.map((c) => (
                 <Option key={c.id} value={c.id}>
                   {c.name}
@@ -272,12 +618,7 @@ function Finance() {
             label="金额(元)"
             rules={[{ required: true, message: '请输入金额' }]}
           >
-            <InputNumber
-              style={{ width: '100%' }}
-              min={0}
-              precision={2}
-              placeholder="请输入金额"
-            />
+            <InputNumber style={{ width: '100%' }} min={0} precision={2} placeholder="请输入金额" />
           </Form.Item>
           <Form.Item
             name="payment_method"
@@ -316,6 +657,87 @@ function Finance() {
             <TextArea rows={2} placeholder="请输入备注" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 申请退费 */}
+      <Modal
+        title="申请退费"
+        open={refundModalVisible}
+        onOk={handleRefundSubmit}
+        onCancel={() => setRefundModalVisible(false)}
+        confirmLoading={refundSubmitting}
+        okText="提交申请"
+        cancelText="取消"
+        destroyOnClose
+      >
+        {refundTarget && (
+          <div style={{ marginBottom: 16 }}>
+            <p style={{ marginBottom: 4 }}>
+              收据号：<Text strong>{refundTarget.receipt_no}</Text>
+            </p>
+            <p style={{ marginBottom: 4 }}>实收金额：{money(refundTarget.amount)} 元</p>
+            <p style={{ marginBottom: 4 }}>已退金额：{money(refundTarget.refunded_amount)} 元</p>
+            <p style={{ marginBottom: 4 }}>
+              待审金额：{money(refundTarget.pending_refund_amount)} 元
+            </p>
+            <p style={{ marginBottom: 0 }}>
+              当前可退：<Text type="success">{money(refundTarget.available_refund_amount)} 元</Text>
+            </p>
+          </div>
+        )}
+        <Form form={refundForm} layout="vertical">
+          <Form.Item
+            name="amount"
+            label="退费金额(元)"
+            rules={[
+              { required: true, message: '请输入退费金额' },
+              {
+                validator: (_, value) => {
+                  const max = Number(refundTarget?.available_refund_amount ?? 0)
+                  if (value <= 0) return Promise.reject(new Error('退费金额必须大于0'))
+                  if (Number(value) > max + 0.001) {
+                    return Promise.reject(new Error(`退费金额不能超过当前可退金额 ${money(max)} 元`))
+                  }
+                  return Promise.resolve()
+                },
+              },
+            ]}
+          >
+            <InputNumber
+              style={{ width: '100%' }}
+              min={0}
+              precision={2}
+              max={Number(refundTarget?.available_refund_amount ?? 0)}
+              placeholder="请输入退费金额"
+            />
+          </Form.Item>
+          <Form.Item name="reason" label="退费原因">
+            <TextArea rows={3} placeholder="请输入退费原因" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 驳回复核 */}
+      <Modal
+        title="驳回退费申请"
+        open={rejectModalVisible}
+        onOk={handleRejectSubmit}
+        onCancel={() => setRejectModalVisible(false)}
+        okText="确认驳回"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+        destroyOnClose
+      >
+        <p>
+          确认驳回金额为 <Text strong>{money(rejectTarget?.amount)}</Text> 元的退费申请？
+          驳回后该笔金额将恢复为可退金额，不改变净收入。
+        </p>
+        <TextArea
+          rows={3}
+          value={rejectReason}
+          onChange={(e) => setRejectReason(e.target.value)}
+          placeholder="请输入驳回原因（可选）"
+        />
       </Modal>
     </div>
   )
