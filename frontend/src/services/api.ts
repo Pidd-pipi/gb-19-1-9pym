@@ -161,6 +161,10 @@ export interface Payment {
   type?: string
   status?: string
   receipt_no?: string
+  refunded_amount?: number
+  pending_refund_amount?: number
+  refundable_amount?: number
+  net_income?: number
   remarks?: string
 }
 
@@ -173,9 +177,22 @@ export const paymentApi = {
   reports: (params?: any) => get('/finance/reports', params),
 }
 
+export interface Refund {
+  id?: number
+  payment_id: number
+  student_id?: number
+  amount: number
+  reason?: string
+  status?: string
+  refund_date?: string
+  created_at?: string
+  payment?: Payment & { student?: Student }
+}
+
 export const refundApi = {
-  list: () => get('/refunds'),
-  create: (data: any) => post('/refunds', data),
+  list: (params?: any) => get('/refunds', params),
+  create: (data: { payment_id: number; amount: number; reason?: string }) =>
+    post('/refunds', data),
   process: (id: number, data: { status: string }) =>
     post(`/refunds/${id}/process`, data),
 }

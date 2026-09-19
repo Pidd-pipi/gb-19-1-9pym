@@ -55,7 +55,7 @@ func Init(cfg *config.DBConfig) error {
 }
 
 func migrate() error {
-	return DB.AutoMigrate(
+	if err := DB.AutoMigrate(
 		&models.User{},
 		&models.Lead{},
 		&models.FollowUp{},
@@ -69,7 +69,15 @@ func migrate() error {
 		&models.Payment{},
 		&models.Refund{},
 		&models.Performance{},
-	)
+	); err != nil {
+		return err
+	}
+
+	// 将历史已批准退费回填到缴费单的已退金额（与退费流程维护的值一致，幂等）
+	return DB.Exec(`UPDATE payments p SET refunded_amount = (
+		SELECT COALESCE(SUM(r.amount), 0) FROM refunds r
+		WHERE r.payment_id = p.id AND r.status = 'approved'
+	)`).Error
 }
 
 func seed() error {

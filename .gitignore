@@ -1,0 +1,7 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# 环境与日志
+.env
+*.log
